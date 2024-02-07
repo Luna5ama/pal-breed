@@ -1,3 +1,3 @@
 # pal-breed
 
-PalWorld pal breeding pathfinder
+PalWorld breeding pathfinder
