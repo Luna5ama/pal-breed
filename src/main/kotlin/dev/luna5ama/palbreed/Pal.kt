@@ -6,11 +6,12 @@ data class Pal(val species: Species, val sex: Sex?, val passive: Set<Passive>) {
             return name
         }
     }
-    data class Species(val name: String, val breedValue: Int, val indexOrder: Int) {
+    data class Species(val id: Int, val name: String, val breedValue: Int, val indexOrder: Int) {
         override fun toString(): String {
             return name
         }
     }
+
     enum class Sex {
         MALE, FEMALE;
 
