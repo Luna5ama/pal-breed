@@ -1,23 +1,7 @@
 package dev.luna5ama.palbreed
 
 import java.util.*
-import kotlin.collections.ArrayDeque
-import kotlin.collections.List
-import kotlin.collections.Set
-import kotlin.collections.associateBy
-import kotlin.collections.filter
-import kotlin.collections.flatMap
-import kotlin.collections.forEach
-import kotlin.collections.isNotEmpty
-import kotlin.collections.last
-import kotlin.collections.listOf
-import kotlin.collections.listOfNotNull
-import kotlin.collections.map
-import kotlin.collections.mapNotNull
-import kotlin.collections.mutableListOf
-import kotlin.collections.plus
 import kotlin.collections.set
-import kotlin.collections.toMutableSet
 import kotlin.math.abs
 
 class BreedCalculator(
@@ -33,13 +17,14 @@ class BreedCalculator(
     init {
         val breedValueMap = TreeMap<Int, Pal.Species>()
         val indexOrderMap = TreeMap<Int, Pal.Species>()
+        val specialResults = specCombData.map { it.third }.toSet()
         val specials = specCombData.groupBy {
             it.first
         }.mapValues { entry ->
             entry.value.associate {
                 it.second to it.third
             }
-        } +specCombData.groupBy {
+        } + specCombData.groupBy {
             it.second
         }.mapValues { entry ->
             entry.value.associate {
@@ -47,21 +32,22 @@ class BreedCalculator(
             }
         }
         speciesData.forEach {
+            if (specialResults.contains(it.name)) return@forEach
             breedValueMap[it.breedValue] = it
             indexOrderMap[it.indexOrder] = it
         }
 
         val table = mutableMapOf<Pal.Species, MutableMap<Pal.Species, Pal.Species>>()
-        speciesData.forEach { a ->
+        for (a in speciesData) {
             val subTable = mutableMapOf<Pal.Species, Pal.Species>()
             val aSpec = specials[a.name]
             table[a] = subTable
-            speciesData.forEach { b ->
+            for (b in speciesData) {
                 if (aSpec != null) {
                     val specChild = aSpec[b.name]
                     if (specChild != null) {
                         subTable[b] = speciesNameMap[specChild]!!
-                        return@forEach
+                        continue
                     }
                 }
                 val avgBreedValue = (a.breedValue + b.breedValue) / 2
@@ -97,24 +83,27 @@ class BreedCalculator(
     }
 
     fun calc(a: Pal, b: Pal): Pal {
-        val childSpecies = lookupTable[a.species]?.get(b.species) ?: throw IllegalArgumentException("No child species found")
+        val childSpecies =
+            lookupTable[a.species]?.get(b.species) ?: throw IllegalArgumentException("No child species found")
         return Pal(childSpecies, null, a.passive + b.passive)
     }
 
-    fun calcTree(pals: Set<Pal>, targetSpecies: Pal.Species, targetPassive: Set<Pal.Passive>?): BreedTreeNode {
+    fun calcTree(pals: Set<Pal>, targetSpecies: Pal.Species, targetPassive: Set<Pal.Passive>, allowedPassive: Set<Pal.Passive>): BreedTreeNode {
         val checked = mutableSetOf<Pair<Pal, Pal>>()
         val poolSet = pals
-            .filter { it.passive.isEmpty() || targetPassive == null || targetPassive.containsAll(it.passive) }
-            .map { BreedTreeNode(0, it) }
+            .filter { it.passive.isEmpty() || allowedPassive.containsAll(it.passive) }
+            .map { BreedTreeNode(0, 0, it) }
             .toMutableSet()
         check(poolSet.isNotEmpty()) { "No input pal found" }
 
         val queue = PriorityQueue(compareBy<BreedTreeNode> {
-            it.depth
+            it.treeSize
         }.thenBy {
             abs(it.pal.species.breedValue - targetSpecies.breedValue)
-        }.thenBy {
-            abs(it.pal.passive.size - (targetPassive?.size ?: 0))
+        }.thenByDescending {
+            it.pal.passive.intersect(targetPassive).size
+        }.thenByDescending {
+            it.pal.passive.intersect(allowedPassive).size
         })
 
         for (nodeA in poolSet) {
@@ -122,7 +111,7 @@ class BreedCalculator(
                 if (nodeA === nodeB) continue
                 if (!Pal.Sex.matched(nodeA.pal.sex, nodeB.pal.sex)) continue
                 if (!checked.add(nodeA.pal to nodeB.pal)) continue
-                queue.add(BreedTreeNode(1, calc(nodeA.pal, nodeB.pal), nodeA, nodeB))
+                queue.add(BreedTreeNode(1, 1, calc(nodeA.pal, nodeB.pal), nodeA, nodeB))
             }
         }
 
@@ -132,7 +121,7 @@ class BreedCalculator(
 
             val a = nodeA.pal
 
-            if (a.species == targetSpecies && (targetPassive == null || a.passive.containsAll(targetPassive))) {
+            if (a.species == targetSpecies && a.passive.containsAll(targetPassive)) {
                 return nodeA
             }
 
@@ -140,29 +129,76 @@ class BreedCalculator(
                 val b = nodeB.pal
                 if (nodeA === nodeB) continue
                 if (!checked.add(a to b)) continue
-                queue.add(BreedTreeNode(maxOf(nodeA.depth, nodeB.depth) + 1, calc(nodeA.pal, nodeB.pal), nodeA, nodeB))
+                queue.add(BreedTreeNode(maxOf(nodeA.depth, nodeB.depth) + 1, nodeA.totalDepth + nodeA.totalDepth + 1, calc(nodeA.pal, nodeB.pal), nodeA, nodeB))
             }
         }
 
         throw IllegalStateException("No result found")
     }
 
-    class BreedTreeNode(val depth: Int, val pal: Pal, val father: BreedTreeNode? = null, val mother: BreedTreeNode? = null) {
-        fun pairTree(): List<List<BreedResult>> {
-            val result = mutableListOf<List<BreedResult>>()
+    class BreedTreeNode(
+        val depth: Int,
+        val totalDepth: Long,
+        val pal: Pal,
+        val father: BreedTreeNode? = null,
+        val mother: BreedTreeNode? = null
+    ) {
+        val treeSize: Int
+
+        init {
+            val queue = ArrayDeque<BreedTreeNode>()
+            queue.add(this)
+            var size = 0
+            while (queue.isNotEmpty()) {
+                val node = queue.poll()
+                val father = node.father ?: continue
+                val mother = node.mother ?: continue
+                size++
+                queue.add(father)
+                queue.add(mother)
+            }
+            treeSize = size
+        }
+
+        fun pairTree(): List<Set<BreedResult>> {
+            val result = mutableListOf<MutableSet<BreedResult>>()
             var layer = listOf(this)
             while (layer.isNotEmpty()) {
-                result.add(layer.mapNotNull { node ->
-                    val father = node.father ?: return@mapNotNull null
-                    val mother = node.mother ?: return@mapNotNull null
+                result.add(layer.mapNotNullTo(mutableSetOf()) { node ->
+                    val father = node.father ?: return@mapNotNullTo null
+                    val mother = node.mother ?: return@mapNotNullTo null
                     BreedResult(father, mother, node)
                 })
                 layer = layer.flatMap { listOfNotNull(it.father, it.mother) }
             }
+            result.dropLast(1).forEach { results ->
+                results.removeIf {
+                    if (it.father.father == null && it.father.mother == null
+                        && it.mother.father == null && it.mother.mother == null) {
+                        result.last().add(it)
+                        true
+                    } else {
+                        false
+                    }
+                }
+            }
+            result.removeIf { it.isEmpty() }
             return result
+        }
 
+        override fun equals(other: Any?): Boolean {
+            if (this === other) return true
+            if (other !is BreedTreeNode) return false
+
+            if (pal != other.pal) return false
+
+            return true
+        }
+
+        override fun hashCode(): Int {
+            return pal.hashCode()
         }
     }
 
-    class BreedResult(val father: BreedTreeNode, val mother: BreedTreeNode, val child: BreedTreeNode)
+    data class BreedResult(val father: BreedTreeNode, val mother: BreedTreeNode, val child: BreedTreeNode)
 }

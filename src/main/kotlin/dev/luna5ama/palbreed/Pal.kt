@@ -12,6 +12,24 @@ data class Pal(val species: Species, val sex: Sex?, val passive: Set<Passive>) {
         }
     }
 
+    override fun equals(other: Any?): Boolean {
+        if (this === other) return true
+        if (other !is Pal) return false
+
+        if (species != other.species) return false
+        if (sex != other.sex) return false
+        if (passive != other.passive) return false
+
+        return true
+    }
+
+    override fun hashCode(): Int {
+        var result = species.hashCode()
+        result = 31 * result + (sex?.hashCode() ?: 0)
+        result = 31 * result + passive.hashCode()
+        return result
+    }
+
     enum class Sex {
         MALE, FEMALE;
 
